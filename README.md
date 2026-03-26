@@ -1,105 +1,119 @@
-# Isaac Gym Environments for Legged Robots #
-This repository provides the environment used to train ANYmal (and other robots) to walk on rough terrain using NVIDIA's Isaac Gym.
-It includes all components needed for sim-to-real transfer: actuator network, friction & mass randomization, noisy observations and random pushes during training.  
+## 题目 B：仿真控制 —— 平衡机器人 LQR 稳定控制（算法理论）
 
-**Maintainer**: Nikita Rudin  
-**Affiliation**: Robotic Systems Lab, ETH Zurich  
-**Contact**: rudinn@ethz.ch  
+本仓库面向**运控/控制算法工程师**，用于在仿真中搭建并验证轮式倒立摆（自平衡小车）的 **LQR（Linear Quadratic Regulator）** 稳定控制器。
 
 ---
 
-### :bell: Announcement (09.01.2024) ###
+### 1. 任务背景
 
-With the shift from Isaac Gym to Isaac Sim at NVIDIA, we have migrated all the environments from this work to [Isaac Lab](https://github.com/isaac-sim/IsaacLab). Following this migration, this repository will receive limited updates and support. We encourage all users to migrate to the new framework for their applications.
-
-Information about this work's locomotion-related tasks in Isaac Lab is available [here](https://isaac-sim.github.io/IsaacLab/main/source/overview/environments.html#locomotion).
+自平衡系统是检验运控工程师对**状态空间建模**与**多变量耦合控制**理解的经典模型。本题要求在仿真环境下，使一个轮式倒立摆机器人实现稳定自平衡，并完成速度追踪。
 
 ---
 
-### Useful Links ###
+### 2. 实验环境
 
-Project website: https://leggedrobotics.github.io/legged_gym/   
-Paper: https://arxiv.org/abs/2109.11978
+- **仿真平台**：MuJoCo 或 Isaac Gym（本仓库默认走 Isaac Gym 路线）
+- **模型文件**：官方/提供的轮式倒立摆 URDF/XML（本仓库提供 `resources/robots/balance/test.urdf`）
+- **控制约束**：使用传统控制算法，如PID/LQR等，当然强化学习也可；允许用于辅助环节如滤波/限幅/抗饱和）
 
-### Installation ###
-1. Create a new python virtual env with python 3.6, 3.7 or 3.8 (3.8 recommended)
-2. Install pytorch 1.10 with cuda-11.3:
-    - `pip3 install torch==1.10.0+cu113 torchvision==0.11.1+cu113 torchaudio==0.10.0+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html`
-3. Install Isaac Gym
-   - Download and install Isaac Gym Preview 3 (Preview 2 will not work!) from https://developer.nvidia.com/isaac-gym
-   - `cd isaacgym/python && pip install -e .`
-   - Try running an example `cd examples && python 1080_balls_of_solitude.py`
-   - For troubleshooting check docs `isaacgym/docs/index.html`)
-4. Install rsl_rl (PPO implementation)
-   - Clone https://github.com/leggedrobotics/rsl_rl
-   -  `cd rsl_rl && git checkout v1.0.2 && pip install -e .` 
-5. Install legged_gym
-    - Clone this repository
-   - `cd legged_gym && pip install -e .`
+---
 
-### CODE STRUCTURE ###
-1. Each environment is defined by an env file (`legged_robot.py`) and a config file (`legged_robot_config.py`). The config file contains two classes: one containing  all the environment parameters (`LeggedRobotCfg`) and one for the training parameters (`LeggedRobotCfgPPo`).  
-2. Both env and config classes use inheritance.  
-3. Each non-zero reward scale specified in `cfg` will add a function with a corresponding name to the list of elements which will be summed to get the total reward.  
-4. Tasks must be registered using `task_registry.register(name, EnvClass, EnvConfig, TrainConfig)`. This is done in `envs/__init__.py`, but can also be done from outside of this repository.  
+### 3. 任务要求
 
-### Usage ###
-1. Train:  
-  ```python legged_gym/scripts/train.py --task=anymal_c_flat```
-    -  To run on CPU add following arguments: `--sim_device=cpu`, `--rl_device=cpu` (sim on CPU and rl on GPU is possible).
-    -  To run headless (no rendering) add `--headless`.
-    - **Important**: To improve performance, once the training starts press `v` to stop the rendering. You can then enable it later to check the progress.
-    - The trained policy is saved in `issacgym_anymal/logs/<experiment_name>/<date_time>_<run_name>/model_<iteration>.pt`. Where `<experiment_name>` and `<run_name>` are defined in the train config.
-    -  The following command line arguments override the values set in the config files:
-     - --task TASK: Task name.
-     - --resume:   Resume training from a checkpoint
-     - --experiment_name EXPERIMENT_NAME: Name of the experiment to run or load.
-     - --run_name RUN_NAME:  Name of the run.
-     - --load_run LOAD_RUN:   Name of the run to load when resume=True. If -1: will load the last run.
-     - --checkpoint CHECKPOINT:  Saved model checkpoint number. If -1: will load the last checkpoint.
-     - --num_envs NUM_ENVS:  Number of environments to create.
-     - --seed SEED:  Random seed.
-     - --max_iterations MAX_ITERATIONS:  Maximum number of training iterations.
-2. Play a trained policy:  
-```python legged_gym/scripts/play.py --task=anymal_c_flat```
-    - By default, the loaded policy is the last model of the last run of the experiment folder.
-    - Other runs/model iteration can be selected by setting `load_run` and `checkpoint` in the train config.
+#### 3.1 数学建模与线性化
 
-### Adding a new environment ###
-The base environment `legged_robot` implements a rough terrain locomotion task. The corresponding cfg does not specify a robot asset (URDF/ MJCF) and has no reward scales. 
+在**垂直平衡点**附近对系统进行线性化，推导状态空间方程：
 
-1. Add a new folder to `envs/` with `'<your_env>_config.py`, which inherit from an existing environment cfgs  
-2. If adding a new robot:
-    - Add the corresponding assets to `resources/`.
-    - In `cfg` set the asset path, define body names, default_joint_positions and PD gains. Specify the desired `train_cfg` and the name of the environment (python class).
-    - In `train_cfg` set `experiment_name` and `run_name`
-3. (If needed) implement your environment in <your_env>.py, inherit from an existing environment, overwrite the desired functions and/or add your reward functions.
-4. Register your env in `isaacgym_anymal/envs/__init__.py`.
-5. Modify/Tune other parameters in your `cfg`, `cfg_train` as needed. To remove a reward set its scale to zero. Do not modify parameters of other envs!
+$$
+\dot{x} = A x + B u
+$$
 
+需要在报告中**明确**：
 
-### Troubleshooting ###
-1. If you get the following error: `ImportError: libpython3.8m.so.1.0: cannot open shared object file: No such file or directory`, do: `sudo apt install libpython3.8`. It is also possible that you need to do `export LD_LIBRARY_PATH=/path/to/libpython/directory` / `export LD_LIBRARY_PATH=/path/to/conda/envs/your_env/lib`(for conda user. Replace /path/to/ to the corresponding path.).
+- **状态向量** x 的定义（例如 x=[p, \dot p, theta, \dot theta]^T 或你等价的定义）
+- **输入向量** u 的定义（例如左右轮扭矩/合力矩等）
+- 线性化点、符号约定、单位（rad/s、N·m、m/s 等）
 
-### Known Issues ###
-1. The contact forces reported by `net_contact_force_tensor` are unreliable when simulating on GPU with a triangle mesh terrain. A workaround is to use force sensors, but the force are propagated through the sensors of consecutive bodies resulting in an undesirable behaviour. However, for a legged robot it is possible to add sensors to the feet/end effector only and get the expected results. When using the force sensors make sure to exclude gravity from the reported forces with `sensor_options.enable_forward_dynamics_forces`. Example:
+#### 3.2 机器人参数（用于建模/线性化的参考值）
+
+请在建模推导中显式写清并使用以下参数（与本仓库 `resources/robots/balance/test.urdf` 一致）：
+
+```text
+m = 0.178      % 车轮质量 (kg)
+r = 0.03375    % 车轮半径 (m)
+M = 0.334      % 车体质量 (kg)
+I = 0.5*m*r^2  % 车轮绕自转轴转动惯量 (kg·m^2)
+l = 0.055      % 质心距底盘中心的距离 (m)
+Jz = (1/3)*M*l*l % 车体绕质心转动惯量 (kg·m^2)
+g = 9.8        % 重力加速度 (m/s^2)
 ```
-    sensor_pose = gymapi.Transform()
-    for name in feet_names:
-        sensor_options = gymapi.ForceSensorProperties()
-        sensor_options.enable_forward_dynamics_forces = False # for example gravity
-        sensor_options.enable_constraint_solver_forces = True # for example contacts
-        sensor_options.use_world_frame = True # report forces in world frame (easier to get vertical components)
-        index = self.gym.find_asset_rigid_body_index(robot_asset, name)
-        self.gym.create_asset_force_sensor(robot_asset, index, sensor_pose, sensor_options)
-    (...)
 
-    sensor_tensor = self.gym.acquire_force_sensor_tensor(self.sim)
-    self.gym.refresh_force_sensor_tensor(self.sim)
-    force_sensor_readings = gymtorch.wrap_tensor(sensor_tensor)
-    self.sensor_forces = force_sensor_readings.view(self.num_envs, 4, 6)[..., :3]
-    (...)
+#### 3.3 控制器设计（LQR）
 
-    self.gym.refresh_force_sensor_tensor(self.sim)
-    contact = self.sensor_forces[:, :, 2] > 1.
-```
+1. **编写代码求解代数黎卡提方程（ARE）**，得到反馈增益矩阵 K
+2. 合理设计 **Q、R 权重矩阵**（说明设计理由与调参过程）
+
+#### 3.4 仿真调试与验证
+
+1. **静止平衡**：在仿真中部署控制器，实现原地站立自平衡（可从小扰动恢复）
+2. **速度追踪实验**：给定前进目标速度指令，展示速度追踪效果（同时保持平衡）
+
+---
+
+### 4. 交付物
+
+- **系统建模与线性化推导过程**（手写稿扫描或 PDF）
+- **仿真控制器实现代码**（以 `legged_gym/tests/LQR.py` 为主要入口）
+- **结果展示**：
+  - 一段视频：机器人稳定站立 + 速度追踪
+  - 绘图：状态收敛曲线（例如 (theta, dottheta, v) 等）与控制输入（扭矩）曲线
+- **结果上传**（请将所有资料打包压缩后发给面试官）
+
+---
+
+### 5. 代码导览（以 `legged_gym/tests/LQR.py` 为主）
+
+本题建议你只改一个文件就能完成闭环验证：
+
+- **入口脚本**：`legged_gym/tests/LQR.py`
+  - 已经完成：创建环境、循环 step、观测拆分、扭矩限幅、将扭矩写入 actions
+  - 需要你完成：在 `# 在此处补充LQR控制器` 区域内实现
+    - 状态构造（包含速度/位移的估计与积分）
+    - 线性化模型 A,B（连续/离散均可，但需自洽）
+    - ARE 求解得到 K（建议缓存/只在初始化时求解一次）
+    - 控制律 u=-K(x-x_{ref}) 与工程处理（限幅、抗饱和等）
+
+相关文件（供参考，不要求改）：
+
+- **环境与观测**：`legged_gym/envs/base/legged_robot.py`（`compute_observations()` 决定 `obs` 的拼接顺序）
+- **平衡小车任务配置**：`legged_gym/envs/balance_car/balance_car_config.py`
+- **URDF 模型**：`resources/robots/balance/test.urdf`（机器人描述文件地址）
+  - 你可以用在线 URDF 预览工具快速检查结构/关节/惯量是否正确：[Robot Viewer](https://viewer.robotsfan.com/)
+
+---
+
+### 6. 环境搭建（初步指南）
+
+请先按仓库 `OEIGINAL_README.md` 的 **Installation** 完成环境配置，核心步骤如下（以 README 为准）：
+
+1. 创建 Python 虚拟环境（推荐 Python 3.8）
+2. 安装 PyTorch（与 CUDA 版本匹配）
+3. 安装 Isaac Gym（Preview 3）
+4. 安装 `rsl_rl`
+5. 安装本仓库 `legged_gym`（`pip install -e .`）
+
+完成后建议按以下顺序跑通：
+
+- **确认任务可创建**（可先跑最小脚本/测试）  
+  - 运行 `legged_gym/tests/LQR.py`，确保能启动仿真循环（先用零扭矩也可以）
+- **进入题目开发**  
+  - 打开 `legged_gym/tests/LQR.py`
+  - 在 `# 在此处补充LQR控制器` 处实现 LQR，并完成“静止平衡 + 0.5m/s 速度追踪”
+
+---
+
+## 附加思考题（简答）
+
+1. **抗饱和设计**：当电机达到最大输出力矩（Saturation）而系统仍未平衡时，LQR 控制器会出现什么现象？你会采取什么工程手段防止系统崩溃？
+2. **时延处理**：若倾角传感器回传存在 20 ms 固定延迟，这对 LQR 的稳定性有何影响？在算法层面你会如何尝试补偿？
+
