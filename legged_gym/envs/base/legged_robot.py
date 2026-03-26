@@ -118,6 +118,8 @@ class LeggedRobot(BaseTask):
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        sinp = 2 * (self.base_quat[:, 3] * self.base_quat[:, 1] - self.base_quat[:, 2] * self.base_quat[:, 0])
+        self.base_pitch = torch.asin(torch.clamp(sinp, -1.0 + 1e-6, 1.0 - 1e-6))
 
         self._post_physics_step_callback()
 
@@ -209,14 +211,16 @@ class LeggedRobot(BaseTask):
     def compute_observations(self):
         """ Computes observations
         """
-        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
-                                    self.base_ang_vel  * self.obs_scales.ang_vel,
-                                    self.projected_gravity,
-                                    self.commands[:, :3] * self.commands_scale,
-                                    (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
-                                    self.dof_vel * self.obs_scales.dof_vel,
-                                    self.actions
-                                    ),dim=-1)
+        # keep all tensors 2D: (num_envs, obs_dim)
+        base_pitch = self.base_pitch.unsqueeze(1) if self.base_pitch.ndim == 1 else self.base_pitch
+        self.obs_buf = torch.cat(
+            (
+                base_pitch,
+                self.base_ang_vel,
+                self.dof_vel,
+            ),
+            dim=-1,
+        )
         # add perceptive inputs if not blind
         if self.cfg.terrain.measure_heights:
             heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
@@ -518,6 +522,10 @@ class LeggedRobot(BaseTask):
         self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        # 四元数转俯仰角
+        # base_quat格式为[x, y, z, w]
+        sinp = 2 * (self.base_quat[:, 3] * self.base_quat[:, 1] - self.base_quat[:, 2] * self.base_quat[:, 0])
+        self.base_pitch = torch.asin(torch.clamp(sinp, -1.0 + 1e-6, 1.0 - 1e-6))
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
         self.measured_heights = 0
@@ -766,7 +774,7 @@ class LeggedRobot(BaseTask):
         """
         y = torch.tensor(self.cfg.terrain.measured_points_y, device=self.device, requires_grad=False)
         x = torch.tensor(self.cfg.terrain.measured_points_x, device=self.device, requires_grad=False)
-        grid_x, grid_y = torch.meshgrid(x, y)
+        grid_x, grid_y = torch.meshgrid(x, y, indexing="ij")
 
         self.num_height_points = grid_x.numel()
         points = torch.zeros(self.num_envs, self.num_height_points, 3, device=self.device, requires_grad=False)

@@ -43,18 +43,44 @@ def test_env(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs =  min(env_cfg.env.num_envs, 10)
-
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+    obs, _ = env.reset()
     for i in range(int(10*env.max_episode_length)):
-        actions = 0.*torch.ones(env.num_envs, env.num_actions, device=env.device)
+
+        #/************************************************** INPUT OBSERVATIONS **************************************************/
+        base_pitch = obs[..., 0]           # (N,)
+        base_ang_vel = obs[..., 1:4]       # (N,3)
+        gyro_pitch = base_ang_vel[..., 1]  # (N,)
+        dof_vel = obs[..., 4:]             # (N,2) -> left/right wheel joint qd
+        #/************************************************** LQR **************************************************/
+
+
+
+
+
+
+
+
+        #在此处补充LQR控制器
+
+
+
+
+
+
+
+
+
+        #/************************************************** OUTPUT TORQUES TO ACTIONS **************************************************/
+        wheel_T_left = torch.zeros(env.num_envs, device=env.device)
+        wheel_T_right = torch.zeros(env.num_envs, device=env.device)
+        wheel_T_left = torch.clamp(wheel_T_left, -0.18, 0.18)
+        wheel_T_right = torch.clamp(wheel_T_right, -0.18, 0.18)
+
+        #/************************************************** ENV STEP **************************************************/
+        actions = torch.stack([wheel_T_left, wheel_T_right], dim=-1)
         obs, _, rew, done, info = env.step(actions)
-        # Print the name and value of each observation component, following the order and names in legged_robot.py
-        # (216-223):
-        # base_pitch, self.base_ang_vel, self.dof_vel
-        base_pitch = obs[..., 0:1]
-        base_ang_vel = obs[..., 1:4]
-        dof_vel = obs[..., 4:]
 
 if __name__ == '__main__':
     args = get_args()
